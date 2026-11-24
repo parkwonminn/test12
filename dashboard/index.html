@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>데이터 대시보드</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, "Malgun Gothic", sans-serif; background: #f4f6fa; color: #222; }
+    header { background: #1f2a44; color: #fff; padding: 20px 28px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+    header h1 { margin: 0; font-size: 22px; }
+    .upload label { background: #3b82f6; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .upload input { display: none; }
+    main { padding: 24px 28px; max-width: 1200px; margin: 0 auto; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .card { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .card .label { font-size: 13px; color: #667; }
+    .card .value { font-size: 26px; font-weight: 700; margin-top: 6px; }
+    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
+    .chart-box { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .chart-box h2 { font-size: 16px; margin: 0 0 12px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; font-size: 14px; }
+    th, td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; }
+    th { background: #f0f3f9; }
+    .table-wrap { margin-top: 16px; background: #fff; border-radius: 10px; overflow-x: auto; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .filter { margin-bottom: 16px; }
+    .filter select { padding: 8px; border-radius: 6px; border: 1px solid #ccd; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📊 데이터 대시보드</h1>
+    <div class="upload">
+      <label>CSV 불러오기<input type="file" id="csvFile" accept=".csv" /></label>
+    </div>
+  </header>
+
+  <main>
+    <div class="filter">
+      <select id="categoryFilter"><option value="">전체 카테고리</option></select>
+    </div>
+
+    <section class="cards">
+      <div class="card"><div class="label">총 매출</div><div class="value" id="kpiSales">-</div></div>
+      <div class="card"><div class="label">총 주문 수</div><div class="value" id="kpiOrders">-</div></div>
+      <div class="card"><div class="label">평균 주문액</div><div class="value" id="kpiAvg">-</div></div>
+    </section>
+
+    <section class="charts">
+      <div class="chart-box"><h2>월별 매출 추이</h2><canvas id="lineChart"></canvas></div>
+      <div class="chart-box"><h2>카테고리별 매출</h2><canvas id="barChart"></canvas></div>
+    </section>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>날짜</th><th>카테고리</th><th>제품</th><th>수량</th><th>금액</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    // 샘플 데이터 (CSV 헤더: date,category,product,qty,amount)
+    const SAMPLE_CSV = `date,category,product,qty,amount
+2026-01-05,전자제품,무선이어폰,2,118000
+2026-01-18,생활용품,텀블러,5,75000
+2026-02-03,전자제품,스마트워치,1,229000
+2026-02-21,식품,커피원두,3,54000
+2026-03-09,생활용품,수건세트,2,38000
+2026-03-27,전자제품,보조배터리,4,136000
+2026-04-11,식품,견과류,6,90000
+2026-04-25,생활용품,텀블러,3,45000
+2026-05-08,전자제품,무선이어폰,1,59000
+2026-05-30,식품,커피원두,4,72000
+2026-06-14,생활용품,수건세트,6,114000
+2026-07-02,전자제품,스마트워치,2,458000`;
+
+    let data = [];
+    let lineChart, barChart;
+    const won = n => n.toLocaleString("ko-KR") + "원";
+
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/);
+      const headers = lines[0].split(",").map(h => h.trim());
+      return lines.slice(1).map(line => {
+        const cells = line.split(",");
+        const row = {};
+        headers.forEach((h, i) => row[h] = (cells[i] || "").trim());
+        row.qty = Number(row.qty) || 0;
+        row.amount = Number(row.amount) || 0;
+        return row;
+      }).filter(r => r.date);
+    }
+
+    function render() {
+      const cat = document.getElementById("categoryFilter").value;
+      const rows = cat ? data.filter(r => r.category === cat) : data;
+
+      const total = rows.reduce((s, r) => s + r.amount, 0);
+      document.getElementById("kpiSales").textContent = won(total);
+      document.getElementById("kpiOrders").textContent = rows.length.toLocaleString("ko-KR") + "건";
+      document.getElementById("kpiAvg").textContent = rows.length ? won(Math.round(total / rows.length)) : "-";
+
+      const byMonth = {};
+      rows.forEach(r => { const m = r.date.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + r.amount; });
+      const months = Object.keys(byMonth).sort();
+
+      const byCat = {};
+      rows.forEach(r => byCat[r.category] = (byCat[r.category] || 0) + r.amount);
+
+      lineChart.data.labels = months;
+      lineChart.data.datasets[0].data = months.map(m => byMonth[m]);
+      lineChart.update();
+
+      barChart.data.labels = Object.keys(byCat);
+      barChart.data.datasets[0].data = Object.values(byCat);
+      barChart.update();
+
+      document.getElementById("rows").innerHTML = rows
+        .map(r => `<tr><td>${r.date}</td><td>${r.category}</td><td>${r.product}</td><td>${r.qty}</td><td>${won(r.amount)}</td></tr>`)
+        .join("");
+    }
+
+    function setupFilter() {
+      const sel = document.getElementById("categoryFilter");
+      const cats = [...new Set(data.map(r => r.category))];
+      sel.innerHTML = `<option value="">전체 카테고리</option>` + cats.map(c => `<option>${c}</option>`).join("");
+    }
+
+    function init(text) {
+      data = parseCSV(text);
+      setupFilter();
+      render();
+    }
+
+    lineChart = new Chart(document.getElementById("lineChart"), {
+      type: "line",
+      data: { labels: [], datasets: [{ label: "매출", data: [], borderColor: "#3b82f6", backgroundColor: "rgba(59,130,246,.15)", fill: true, tension: .3 }] },
+      options: { plugins: { legend: { display: false } } }
+    });
+    barChart = new Chart(document.getElementById("barChart"), {
+      type: "bar",
+      data: { labels: [], datasets: [{ label: "매출", data: [], backgroundColor: ["#3b82f6", "#10b981", "#f59e0b", "#ef4444"] }] },
+      options: { plugins: { legend: { display: false } } }
+    });
+
+    document.getElementById("categoryFilter").addEventListener("change", render);
+    document.getElementById("csvFile").addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => init(ev.target.result);
+      reader.readAsText(file, "UTF-8");
+    });
+
+    init(SAMPLE_CSV);
+  </script>
+</body>
+</html>
